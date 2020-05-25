@@ -18,7 +18,7 @@ wire [6:0] hex1;
 wire [6:0] hex2;
 wire [6:0] hex3;
 
-stopwatch #(.PULSE_MAX(2)) DUT (
+stopwatch #(.PULSE_MAX(1)) DUT (
   .clk100_i     ( clk100     ),
   .rstn_i       ( rstn       ),
   .start_stop_i ( start_stop ),

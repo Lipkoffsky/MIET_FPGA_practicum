@@ -17,10 +17,13 @@ module stopwatch #(
     output   [6:0]    hex3_o
 );
 
-localparam RUN_STATE = 1'd1;
-localparam SET_STATE = 1'd0;
+localparam RUN_STATE = 3'd0;
+localparam CHANGE_H  = 3'd1;
+localparam CHANGE_TS = 3'd2;
+localparam CHANGE_S  = 3'd3;
+localparam CHANGE_T  = 3'd4;
 
-reg state_stopwatch = RUN_STATE;
+
 reg device_running;
 
 // PULSE COUNTER
@@ -77,14 +80,12 @@ debounce change(
 
 // DEVICE RUNNING
 
-always @( posedge clk100_i )
-  if( set_pressed && ~device_running )
-    state_stopwatch <= SET_STATE;
- 
-always @( posedge clk100_i or negedge rstn_i ) begin
-      if( !rstn_i )
-        device_running <= 0;
-      else if ( button_pressed && state_stopwatch == RUN_STATE )
+always @( posedge clk100_i ) begin
+  if ( !rstn_i )
+    device_running <= 0;
+  if ( passed_all )
+    device_running <= 1;
+  else if ( button_pressed && stopwatch_state == RUN_STATE )
         device_running <= ~device_running;
 end   
 
@@ -92,18 +93,23 @@ end
  // MAIN COUNTERS
  // HUNDREDTHS COUNTER
 reg [3:0] hundredths_counter = 4'd0; 
+
 wire  tenth_of_second_passed;
 assign tenth_of_second_passed = ( ( hundredths_counter == COUNT_MAX ) &  hundredth_of_second_passed );
+
 always @( posedge clk100_i or negedge rstn_i ) begin
-  if ( !rstn_i )
+  if ( !rstn_i ) 
     hundredths_counter <= 0;
-  else if ( hundredth_of_second_passed )
-    if ( tenth_of_second_passed )
+  else if ( hundredth_of_second_passed  ) begin
+    if ( tenth_of_second_passed  ) 
       hundredths_counter <= 0;
     else 
       hundredths_counter <= hundredths_counter + 1;
+  end
+  else if ( stopwatch_state == CHANGE_H && increment )
+      hundredths_counter <= hundredths_counter + 1;
 end
- 
+
 // TENTHS COUNTER
 reg [3:0] tenths_counter = 4'd0; 
 wire second_passed;
@@ -116,6 +122,8 @@ always @( posedge clk100_i or negedge rstn_i ) begin
       tenths_counter <= 0;
     else 
       tenths_counter <= tenths_counter + 1;
+  else if ( stopwatch_state == CHANGE_TS && increment )
+    tenths_counter <= tenths_counter + 1;
 end
  
 // SECONDS COUNTER
@@ -130,6 +138,8 @@ always @( posedge clk100_i or negedge rstn_i ) begin
       seconds_counter <= 0;
     else 
       seconds_counter <= seconds_counter + 1;
+  else if ( stopwatch_state == CHANGE_S && increment )
+        seconds_counter <= seconds_counter + 1;      
 end
  
  // TENS COUNTER
@@ -188,90 +198,20 @@ assign hex0_o = decoder_hundredths;
 
 
 // MACHINE INITIALIZATION
+reg        device_running;
+wire [2:0] stopwatch_state;
+wire       increment;
+wire       passed_all;
 
-reg [2:0] state;
-reg [2:0] next_state;   
-
-localparam RUNNING_STATE    = 3'd0;
-localparam CHANGE_HUND  = 3'd1;
-localparam CHANGE_TENTH = 3'd2;
-localparam CHANGE_SEC   = 3'd3;
-localparam CHANGE_TEN   = 3'd4;
-
-always @(*) 
- begin
-   case ( state )
-     RUNNING_STATE : if ( ( !device_running ) & ( set_pressed ) ) 
-                   next_state = CHANGE_TEN;
-                 else 
-                   next_state = RUN_STATE;
-                   
-     CHANGE_HUND : if ( set_pressed ) 
-                     next_state = CHANGE_TENTH;
-                   else if ( change_pressed ) 
-                     begin 
-                       if ( hundredths_counter == 4'd9 )
-                         hundredths_counter = 4'd0;
-                       else
-                         hundredths_counter = hundredths_counter + 1;
-                         next_state = CHANGE_HUND;
-                     end
-                   else 
-                     next_state = CHANGE_HUND;
-
-     CHANGE_TENTH : if ( set_pressed ) 
-                      next_state = CHANGE_SEC;
-                    else if ( change_pressed ) 
-                      begin
-                        if ( tenths_counter == 4'd9 )
-                          tenths_counter = 4'd0;
-                        else
-                          tenths_counter = tenths_counter + 1;
-                          next_state = CHANGE_TENTH;
-                     end
-                   else 
-                     next_state = CHANGE_TENTH;
-
-     CHANGE_SEC : if ( set_pressed ) 
-                    next_state = CHANGE_TEN;
-                  else if ( change_pressed ) 
-                    begin
-                      if ( seconds_counter == 4'd9 )
-                        seconds_counter = 4'd0;
-                      else
-                        seconds_counter = seconds_counter + 1;
-                        next_state = CHANGE_SEC;
-                    end
-                  else 
-                    next_state = CHANGE_SEC;
-
-     CHANGE_TEN : if ( set_pressed )
-                    next_state = RUNNING_STATE;
-                  else if ( change_pressed ) 
-                    begin
-                      if ( ten_seconds_counter == 4'd9 )
-                        ten_seconds_counter = 4'd0;
-                      else
-                        ten_seconds_counter = ten_seconds_counter + 1;
-                        next_state = CHANGE_TEN;
-                    end
-                 else 
-                   next_state = CHANGE_TEN;
-
-     default : next_state = RUNNING_STATE;
-   endcase
- end 
-
-always @( posedge clk100_i or negedge rstn_i ) begin
-if ( !rstn_i ) begin
-  state                 <= RUNNING_STATE;
-  ten_seconds_counter   <= 4'd0;
-  seconds_counter       <= 4'd0;
-  tenths_counter        <= 4'd0;
-  hundredths_counter    <= 4'd0;
-end
-else 
-  state <= next_state;
-end
+fin_machine fin_m(
+  .clk_i         ( clk100_i        ),
+  .rstn_i        ( !rstn_i         ),
+  .dev_run_i     ( device_running  ),
+  .set_i         ( set_pressed     ),
+  .change_i      ( change_pressed  ),
+  .state_value_o ( stopwatch_state ),
+  .inc_this_o    ( increment       ),
+  .passed_all_o  ( passed_all      )
+);
 
 endmodule
